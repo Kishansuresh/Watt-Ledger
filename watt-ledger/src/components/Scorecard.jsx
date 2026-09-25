@@ -1,87 +1,119 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { supabase } from "../utils/supabaseClient";
+import { ShieldCheck, Leaf, Wind, Award, Zap, Factory, AlertCircle } from "lucide-react";
 
 export default function Scorecard({ facility }) {
-  // Dynamically swap scorecard metrics based on the active facility
-  const dataMap = {
-    tower_a: {
-      grade: "B+", eui: 68.4, target: 75.0, avg: 92.0, ringColor: "stroke-emerald-500", 
-      checklist: [
-        { metric: "Lighting Power Density", value: "0.78 W/sq ft", status: "Pass", limit: "< 0.90 W/sq ft" },
-        { metric: "HVAC Fan Efficiency", value: "0.85 W/CFM", status: "Pass", limit: "< 1.20 W/CFM" },
-        { metric: "Economizer Operation", value: "Fault Detected", status: "Fail", limit: "Fully Functional" },
-        { metric: "Night Setback Controls", value: "Active (w/ Overrides)", status: "Warning", limit: "Enforced" }
-      ]
-    },
-    default: {
-      grade: "C-", eui: 94.2, target: 85.0, avg: 92.0, ringColor: "stroke-rose-500",
-      checklist: [
-        { metric: "Lighting Power Density", value: "0.95 W/sq ft", status: "Fail", limit: "< 0.85 W/sq ft" },
-        { metric: "HVAC Fan Efficiency", value: "1.15 W/CFM", status: "Warning", limit: "< 1.10 W/CFM" },
-        { metric: "Economizer Operation", value: "Optimized", status: "Pass", limit: "Fully Functional" },
-        { metric: "Night Setback Controls", value: "Complete Override", status: "Fail", limit: "Enforced" }
-      ]
+  const [scoreData, setScoreData] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
+
+  useEffect(() => {
+    async function fetchScorecard() {
+      setIsLoading(true);
+      setFetchError(false);
+      
+      try {
+        const { data, error } = await supabase
+          .from("esg_scorecards")
+          .select("*")
+          .eq("facility_id", facility)
+          .single();
+          
+        if (error) throw error;
+        if (data) setScoreData(data);
+      } catch (error) {
+        console.error("Scorecard Fetch Error:", error);
+        setFetchError(true);
+      } finally {
+        setIsLoading(false);
+      }
     }
-  };
 
-  const currentData = dataMap[facility] || dataMap.default;
+    fetchScorecard();
+  }, [facility]);
 
+  // We ALWAYS render the outer shell so you never get a blank screen
   return (
-    <div className="p-6 space-y-6 max-w-7xl w-full mx-auto font-sans">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-100">ASHRAE 90.1 Scorecard</h2>
-          <p className="text-sm text-slate-400 mt-1">Live compliance tracking and Energy Use Intensity (EUI) metrics.</p>
-        </div>
-        <div className="bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-lg border border-emerald-500/20 flex items-center space-x-2">
-          <span className="font-bold text-xl">{currentData.grade}</span>
-          <span className="text-xs uppercase tracking-wide">Overall Rating</span>
-        </div>
+    <section className="p-6 space-y-6 max-w-7xl w-full mx-auto font-sans">
+      <div>
+        <h1 className="flex items-center gap-2 text-2xl font-extrabold text-white">
+          <ShieldCheck className="w-6 h-6 text-emerald-400" />
+          ESG & Compliance Scorecard
+        </h1>
+        <p className="mt-2 text-sm text-slate-400">
+          Live environmental, social, and governance reporting metrics for corporate sustainability goals.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-[#111827] rounded-xl border border-slate-800 p-6 flex flex-col items-center justify-center">
-          <h3 className="text-sm font-medium text-slate-400 mb-6">Site EUI (kBTU / sq ft / yr)</h3>
-          <div className="relative w-40 h-40 flex items-center justify-center rounded-full border-8 border-slate-800">
-            <svg className="absolute inset-0 w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="46" fill="transparent" strokeWidth="8" strokeDasharray="289" strokeDashoffset="60" className={`opacity-80 ${currentData.ringColor}`} />
-            </svg>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-slate-100 font-mono">{currentData.eui}</div>
-            </div>
-          </div>
-          <div className="mt-6 w-full flex justify-between text-xs text-slate-500">
-            <span>Target: {currentData.target}</span>
-            <span>National Avg: {currentData.avg}</span>
-          </div>
+      {isLoading ? (
+        <div className="py-20 flex flex-col items-center justify-center border border-dashed border-slate-700 rounded-xl bg-slate-900/50">
+          <div className="h-8 w-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <span className="text-slate-300 font-medium">Syncing ESG Metrics from Cloud...</span>
         </div>
+      ) : fetchError || !scoreData ? (
+        <div className="py-20 flex flex-col items-center justify-center border border-dashed border-rose-900/50 rounded-xl bg-rose-500/5">
+          <AlertCircle className="w-10 h-10 text-rose-500 mb-4" />
+          <span className="text-rose-400 font-medium text-lg">No ESG Data Found</span>
+          <p className="text-slate-500 text-sm mt-2 max-w-md text-center">
+            The Supabase database does not have a scorecard entry for this facility. 
+            Ensure your SQL seed script ran successfully.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Energy Star Rating */}
+          <div className="bg-[#111827] rounded-xl border border-slate-800 p-6 flex flex-col items-center text-center relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-12 bg-blue-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+            <Award className="w-10 h-10 text-blue-400 mb-4 relative z-10" />
+            <h3 className="text-slate-400 font-semibold text-sm uppercase tracking-wider mb-2 relative z-10">Energy Star Score</h3>
+            <div className="text-5xl font-black text-slate-100 relative z-10">{scoreData.energy_star || 0}</div>
+            <p className="text-xs text-slate-500 mt-4 relative z-10">Out of 100 benchmarked percentile</p>
+          </div>
 
-        <div className="lg:col-span-2 bg-[#111827] rounded-xl border border-slate-800 p-6">
-          <h3 className="text-sm font-medium text-slate-300 mb-4">Sub-System Compliance</h3>
-          <div className="space-y-4">
-            {currentData.checklist.map((item, idx) => (
-              <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-[#172033] border border-slate-700/50">
-                <div className="flex items-center space-x-4">
-                  <div className={`w-2 h-2 rounded-full ${
-                    item.status === 'Pass' ? 'bg-emerald-500' : 
-                    item.status === 'Warning' ? 'bg-amber-500' : 'bg-rose-500'
-                  }`}></div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-200">{item.metric}</div>
-                    <div className="text-xs text-slate-500">Requirement: {item.limit}</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-mono text-slate-300">{item.value}</div>
-                  <div className={`text-xs font-medium ${
-                    item.status === 'Pass' ? 'text-emerald-400' : 
-                    item.status === 'Warning' ? 'text-amber-400' : 'text-rose-400'
-                  }`}>{item.status}</div>
-                </div>
+          {/* LEED Certification */}
+          <div className="bg-[#111827] rounded-xl border border-slate-800 p-6 flex flex-col items-center text-center relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-12 bg-emerald-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+            <Leaf className="w-10 h-10 text-emerald-400 mb-4 relative z-10" />
+            <h3 className="text-slate-400 font-semibold text-sm uppercase tracking-wider mb-2 relative z-10">Green Building Status</h3>
+            <div className="text-3xl font-black text-emerald-400 relative z-10 py-2">{scoreData.leed_level || "Pending"}</div>
+            <p className="text-xs text-slate-500 mt-2 relative z-10">USGBC verified certification level</p>
+          </div>
+
+          {/* Indoor Air Quality */}
+          <div className="bg-[#111827] rounded-xl border border-slate-800 p-6 flex flex-col items-center text-center relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-12 bg-teal-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+            <Wind className="w-10 h-10 text-teal-400 mb-4 relative z-10" />
+            <h3 className="text-slate-400 font-semibold text-sm uppercase tracking-wider mb-2 relative z-10">Indoor Air Quality</h3>
+            <div className="text-5xl font-black text-slate-100 relative z-10">{scoreData.indoor_air_quality || 0}</div>
+            <p className="text-xs text-slate-500 mt-4 relative z-10">Health index (CO₂, VOCs, Particulates)</p>
+          </div>
+
+          {/* Carbon Emissions */}
+          <div className="bg-[#111827] rounded-xl border border-slate-800 p-6 flex flex-col items-center text-center relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-12 bg-rose-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+            <Factory className="w-10 h-10 text-rose-400 mb-4 relative z-10" />
+            <h3 className="text-slate-400 font-semibold text-sm uppercase tracking-wider mb-2 relative z-10">YTD Carbon Emissions</h3>
+            <div className="text-5xl font-black text-slate-100 relative z-10">{scoreData.carbon_emissions ? scoreData.carbon_emissions.toLocaleString() : 0}</div>
+            <p className="text-xs text-slate-500 mt-4 relative z-10">Metric tons of CO₂ equivalent (tCO₂e)</p>
+          </div>
+
+          {/* Renewable Offset */}
+          <div className="bg-[#111827] rounded-xl border border-slate-800 p-6 flex flex-col items-center text-center relative overflow-hidden group lg:col-span-2">
+            <div className="absolute top-0 right-0 p-16 bg-amber-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+            <Zap className="w-10 h-10 text-amber-400 mb-4 relative z-10" />
+            <h3 className="text-slate-400 font-semibold text-sm uppercase tracking-wider mb-2 relative z-10">Renewable Energy Offset</h3>
+            <div className="w-full bg-slate-800 h-6 rounded-full mt-4 mb-2 overflow-hidden relative z-10">
+              <div 
+                className="bg-amber-500 h-full rounded-full flex items-center justify-center text-[10px] font-bold text-amber-950 transition-all duration-1000 ease-out"
+                style={{ width: `${scoreData.renewable_pct || 0}%` }}
+              >
+                {scoreData.renewable_pct || 0}%
               </div>
-            ))}
+            </div>
+            <p className="text-xs text-slate-500 mt-2 relative z-10">Percentage of total load offset by onsite solar and green grid purchasing</p>
           </div>
         </div>
-      </div>
-    </div>
+      )}
+    </section>
   );
 }

@@ -1,24 +1,40 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { supabase } from "../utils/supabaseClient";
 
-export default function ActionableROI({ onReview, onExport, facility }) {
-  // Dynamically swap projects based on the active facility
-  const dataSets = {
-    tower_a: [
-      { id: "ROI-01", name: "Chiller Plant Delta-T Optimization", type: "HVAC Control", capex: 680000, annualSavings: 1136000, payback: 7.1, status: "Ready for Approval" },
-      { id: "ROI-02", name: "Floor 4 AHU-2 VFD Retrofit", type: "Mechanical", capex: 256000, annualSavings: 492000, payback: 6.2, status: "Ready for Approval" },
-      { id: "ROI-03", name: "North Wing Lighting DR Module", type: "Lighting", capex: 148000, annualSavings: 192000, payback: 9.2, status: "In Review" },
-      { id: "ROI-04", name: "Boiler O2 Trim Controls", type: "Heating", capex: 960000, annualSavings: 464000, payback: 24.8, status: "Deferred" }
-    ],
-    default: [
-      { id: "ROI-05", name: "Cooling Tower Variable Speed Fans", type: "HVAC", capex: 420000, annualSavings: 850000, payback: 5.9, status: "Ready for Approval" },
-      { id: "ROI-06", name: "Perimeter Heating Zone Valves", type: "Mechanical", capex: 115000, annualSavings: 180000, payback: 7.6, status: "In Review" },
-      { id: "ROI-07", name: "Smart Parking Garage Lighting", type: "Lighting", capex: 320000, annualSavings: 410000, payback: 9.3, status: "Ready for Approval" },
-      { id: "ROI-08", name: "Air Compressor Leak Repair", type: "Pneumatics", capex: 45000, annualSavings: 110000, payback: 4.9, status: "Deferred" }
-    ]
-  };
+export default function ActionableROI({ onReview, onExport, utilityRate, facility }) {
+  const [roiMeasures, setRoiMeasures] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Fallback to 'default' if the specific facility ID isn't mapped
-  const roiProjects = dataSets[facility] || dataSets.default;
+  useEffect(() => {
+    async function fetchROI() {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from('roi_measures')
+        .select('*')
+        .eq('facility_id', facility);
+
+      if (!error && data) {
+        setRoiMeasures(data);
+      }
+      setIsLoading(false);
+    }
+    fetchROI();
+  }, [facility]);
+
+  const roiProjects = roiMeasures.map(measure => {
+    const annualSavings = measure.kw * measure.hours * utilityRate;
+    const paybackMonths = annualSavings > 0 ? (measure.cost / annualSavings) * 12 : 0;
+    
+    return {
+      id: measure.id,
+      name: measure.name,
+      type: measure.zone,
+      capex: measure.cost,
+      annualSavings: Math.round(annualSavings),
+      payback: parseFloat(paybackMonths.toFixed(1)),
+      status: paybackMonths < 12 ? "Ready for Approval" : "In Review"
+    };
+  });
 
   return (
     <div className="p-6 space-y-6 max-w-7xl w-full mx-auto font-sans">
@@ -40,20 +56,24 @@ export default function ActionableROI({ onReview, onExport, facility }) {
           <table className="w-full text-left text-sm text-slate-300">
             <thead className="text-xs uppercase bg-[#172033] text-slate-400 border-b border-slate-800">
               <tr>
-                <th className="px-6 py-4 font-semibold">Project / Asset</th>
-                <th className="px-6 py-4 font-semibold">Est. CapEx</th>
-                <th className="px-6 py-4 font-semibold">Annual Savings</th>
-                <th className="px-6 py-4 font-semibold">Payback (Months)</th>
-                <th className="px-6 py-4 font-semibold">Status</th>
-                <th className="px-6 py-4 font-semibold text-right">Action</th>
+                <th className="px-6 py-4 font-semibold whitespace-nowrap">Project / Asset</th>
+                <th className="px-6 py-4 font-semibold whitespace-nowrap">Est. CapEx</th>
+                <th className="px-6 py-4 font-semibold whitespace-nowrap">Annual Savings</th>
+                <th className="px-6 py-4 font-semibold whitespace-nowrap">Payback (Months)</th>
+                <th className="px-6 py-4 font-semibold whitespace-nowrap">Status</th>
+                <th className="px-6 py-4 font-semibold text-right whitespace-nowrap">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {roiProjects.map((project) => (
+              {isLoading ? (
+                <tr>
+                  <td colSpan="6" className="px-6 py-8 text-center text-slate-500">Loading live data from Supabase...</td>
+                </tr>
+              ) : roiProjects.map((project) => (
                 <tr key={project.id} className="hover:bg-slate-800/30 transition-colors">
                   <td className="px-6 py-4">
                     <div className="font-medium text-slate-200">{project.name}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">{project.type} • {project.id}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{project.type}</div>
                   </td>
                   <td className="px-6 py-4 font-mono">₹{project.capex.toLocaleString("en-IN")}</td>
                   <td className="px-6 py-4 font-mono text-emerald-400">₹{project.annualSavings.toLocaleString("en-IN")}</td>
@@ -71,7 +91,7 @@ export default function ActionableROI({ onReview, onExport, facility }) {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap ${
                       project.status === 'Ready for Approval' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
                       project.status === 'In Review' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
                       'bg-slate-800 text-slate-400 border-slate-700'

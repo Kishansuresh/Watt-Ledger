@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "./utils/supabaseClient";
 
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -16,7 +17,6 @@ import ActionableROI from "./components/ActionableROI";
 import Scorecard from "./components/Scorecard";
 import Sandbox from "./components/Sandbox";
 
-import { FACILITY_OPTIONS, INITIAL_ZONES } from "./data/mockData";
 import {
   generateFacilityTimeseries,
   parseMeterCsv,
@@ -25,10 +25,14 @@ import {
   residualZScore,
 } from "./utils/energyData";
 
+// Moved directly into App.jsx to prevent missing file crashes
+export const FACILITY_OPTIONS = [
+  { id: "tower_a", name: "Metro Tower A (Commercial Office)", grossSqFt: 280000, lat: 40.7128, lon: -74.0060 },
+  { id: "retail_mall", name: "Retail Mall Zone 3 (Shopping Center)", grossSqFt: 420000, lat: 34.0522, lon: -118.2437 },
+  { id: "corporate_hq", name: "Corporate HQ Tech Campus", grossSqFt: 350000, lat: 41.8781, lon: -87.6298 },
+];
+
 export default function App() {
-  /* =========================================================
-     CORE STATE
-  ========================================================= */
   const [activeTab, setActiveTab] = useState("dashboard");
   const [facility, setFacility] = useState("tower_a");
   const [utilityRate, setUtilityRate] = useState(8.50); 
@@ -38,7 +42,8 @@ export default function App() {
   const [csvError, setCsvError] = useState(null);
 
   const [timeseries, setTimeseries] = useState([]);
-  const [zones, setZones] = useState(INITIAL_ZONES);
+  const [zones, setZones] = useState([]);
+  const [isDbLoading, setIsDbLoading] = useState(true);
   const [anomaliesList, setAnomaliesList] = useState([]);
 
   const [toastMessage, setToastMessage] = useState(null);
@@ -61,36 +66,34 @@ export default function App() {
   const chatEndRef = useRef(null);
 
   /* =========================================================
-     DYNAMIC DATA MAPPING
+     SUPABASE FETCH & DATA GENERATION
   ========================================================= */
   useEffect(() => {
-    // Only generate default timeseries if no CSV is loaded
-    if (!csvSourceName) {
-      const data = generateFacilityTimeseries(facility, true);
-      setTimeseries(data);
+    async function fetchFacilityData() {
+      setIsDbLoading(true);
+
+      const { data: activeZones, error } = await supabase
+        .from('zones')
+        .select('*')
+        .eq('facility_id', facility);
+
+      if (error) {
+        console.error("Error fetching live zones:", error);
+      } else if (activeZones) {
+        setZones(activeZones);
+      }
+
+      if (!csvSourceName) {
+        const data = generateFacilityTimeseries(facility, true);
+        setTimeseries(data);
+      }
+
+      setIsDbLoading(false);
     }
 
-    // Map to custom keys: healthScore and issue
-    const facilityZones = {
-      tower_a: INITIAL_ZONES,
-      retail_mall: [
-        { id: "zone-chiller", name: "Food Court HVAC", currentKw: 310, baselineKw: 220, healthScore: 35, issue: "Compressor short-cycling" },
-        { id: "zone-fl4", name: "Anchor Store East", currentKw: 145, baselineKw: 80, healthScore: 12, issue: "Humidity control failure" },
-        { id: "zone-server", name: "Parking Garage Lighting", currentKw: 85, baselineKw: 80, healthScore: 92, issue: "Nominal operation" },
-        { id: "zone-fl2", name: "Boutique Retail Wing", currentKw: 55, baselineKw: 30, healthScore: 25, issue: "Daylight harvesting offline" }
-      ],
-      corporate_hq: [
-        { id: "zone-chiller", name: "Campus Cooling Tower", currentKw: 420, baselineKw: 280, healthScore: 20, issue: "Excessive terminal reheat" },
-        { id: "zone-fl4", name: "R&D Labs AHU-1", currentKw: 180, baselineKw: 110, healthScore: 45, issue: "Static pressure drop" },
-        { id: "zone-server", name: "Main Server Farm", currentKw: 315, baselineKw: 290, healthScore: 88, issue: "O2 trim sensor variance" },
-        { id: "zone-fl2", name: "Executive Boardroom", currentKw: 95, baselineKw: 60, healthScore: 30, issue: "Override locked ON" }
-      ]
-    };
-
-    setZones(facilityZones[facility] || INITIAL_ZONES);
+    fetchFacilityData();
   }, [facility, csvSourceName]);
 
-  // Build Live Waste Feed dynamically with ₹ impact
   useEffect(() => {
     if (!timeseries || timeseries.length === 0) return;
     
@@ -262,19 +265,22 @@ export default function App() {
       let reply = "";
 
       const equipmentList = ["Floor 4 AHU-2", "Central Plant Chiller-1", "Rooftop RTU-4", "Zone 3 VAV-304", "Condenser Water Pump B"];
+      
+      // PERFECTLY ALIGNED ARRAYS: Index 0 Diagnosis matches Index 0 Resolution Protocol
       const diagnosticsList = [
-        "BAS static pressure commanding 0.0 in. w.g., but flow sensor reports 2,400 CFM. Actuator damper stuck.",
+        "BAS static pressure commanding 0.0 in. w.g., but flow sensor reports 2,400 CFM. Actuator damper stuck open.",
         "Zone temperature sensor offline, causing system to default to 100% fail-safe cooling.",
-        "Manual occupancy override was triggered and never cleared.",
-        "Variable frequency drive (VFD) hunting rapidly between 45Hz and 60Hz.",
-        "Chilled water valve failed open, causing severe space overcooling."
+        "Manual occupancy override was triggered and never cleared by the weekend staff.",
+        "Variable frequency drive (VFD) hunting rapidly between 45Hz and 60Hz due to poor PID tuning.",
+        "Chilled water valve failed open, causing severe space overcooling and wasted pump energy."
       ];
+      
       const actionItems = [
-        "Dispatch HVAC technician to manually clear physical obstruction.",
-        "Reset the manual override flag in the BAS.",
-        "Replace the faulty thermistor.",
-        "Tune the PID loop parameters to stabilize fan modulation.",
-        "Manually stroke the valve actuator."
+        "1. Dispatch technician to inspect damper physical linkage.\n2. Clear obstruction and recalibrate actuator stroke.\n3. Verify CFM drops to 0 when commanded.",
+        "1. Dispatch technician to replace faulty zone thermistor.\n2. Verify controller receives accurate resistance reading.\n3. Release fail-safe mode in BAS.",
+        "1. Access the BAS scheduling module.\n2. Identify the active manual override flag for this zone.\n3. Release the override and restore dynamic night setback.",
+        "1. Access VFD parameter settings.\n2. Tune the PID loop proportional/integral bands to stabilize modulation.\n3. Monitor for 15 minutes to ensure hunting ceases.",
+        "1. Dispatch technician to manually stroke the chilled water valve actuator.\n2. If actuator motor is burnt, replace unit.\n3. Verify space temperature recovers to target deadband."
       ];
 
       const randomIdx = Math.floor(Math.random() * equipmentList.length);
@@ -296,7 +302,9 @@ export default function App() {
         const hourlyRate = parseFloat(impact.replace(/[^0-9.]/g, "")) || 225.0;
         const variance = (Math.random() * 0.2) + 0.9; 
         const monthlyProjection = Math.round(hourlyRate * 4 * 4.3 * variance); 
-        reply = `Telemetry Investigation [${time}] — Status: ${severity}\n\n• Target Equipment: ${contextEquip}\n• Financial Run-Rate: At ${impact}, recurring off-cycle operation costs an estimated ₹${monthlyProjection.toLocaleString("en-IN")}/month.\n• Anomaly Diagnostics: ${activeDiag}\n• Action Item: ${activeAction}`;
+        
+        // UPDATED AI TEMPLATE
+        reply = `Telemetry Investigation [${time}] — Status: ${severity}\n\n• Target Equipment: ${contextEquip}\n• Financial Run-Rate: At ${impact}, recurring off-cycle operation costs an estimated ₹${monthlyProjection.toLocaleString("en-IN")}/month.\n• Anomaly Diagnostics: ${activeDiag}\n\n🛠️ Recommended Resolution Protocol:\n${activeAction}`;
       } 
       else if (lower.includes("payback") || lower.includes("vfd")) {
         const projName = lower.replace(/calculate payback for/i, "").trim() || "VFD Retrofit";
@@ -313,7 +321,7 @@ export default function App() {
       } 
       else if (lower.includes("chiller")) {
         const deltaT = (Math.random() * (7.5 - 5.0) + 5.0).toFixed(1);
-        reply = `Central Chiller Plant Telemetry:\n\n• Measured Load: 245 kW (Baseline: 160 kW)\n• Excess Power Draw: +85 kW\n• Diagnosis: Low Delta-T syndrome detected (ΔT = ${deltaT}°F vs 12.0°F design specification). Primary pump cycling rapidly due to bypass valve hunting.`;
+        reply = `Central Chiller Plant Telemetry:\n\n• Measured Load: 245 kW (Baseline: 160 kW)\n• Excess Power Draw: +85 kW\n• Diagnosis: Low Delta-T syndrome detected (ΔT = ${deltaT}°F vs 12.0°F design specification). Primary pump cycling rapidly due to bypass valve hunting.\n\n🛠️ Recommended Resolution Protocol:\n1. Override bypass valve to 0% manually.\n2. Observe pump VFD Hz response.\n3. If valve fails to close, replace actuator.`;
       } 
       else if (lower.includes("waste") || lower.includes("baseline") || lower.includes("kwh")) {
         reply = `Facility Energy Summary:\n\n• Total Detected Waste: ${metrics.wasteKwh.toLocaleString("en-IN")} kWh (+${metrics.pctOverBaseline}% over baseline)\n• Avoidable Cost Impact: ₹${metrics.avoidableCost.toLocaleString("en-IN")}\n• Carbon Footprint: ${metrics.avoidableCo2Tons} tons CO₂e\n• Primary Culprit: ${activeEquip} failure.`;
@@ -341,7 +349,6 @@ export default function App() {
   return (
     <div className="flex h-screen w-full bg-[#0b0f17] text-slate-100 overflow-hidden font-sans">
       
-      {/* CUSTOM SCROLLBARS */}
       <style>{`
         .overflow-y-auto::-webkit-scrollbar, .overflow-x-auto::-webkit-scrollbar { width: 6px; height: 6px; }
         .overflow-y-auto::-webkit-scrollbar-track, .overflow-x-auto::-webkit-scrollbar-track { background: transparent; }
@@ -419,40 +426,44 @@ export default function App() {
               <div className="lg:col-span-2 bg-[#111827] rounded-xl border border-slate-800 p-6 flex flex-col">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center space-x-2 text-emerald-400 font-medium">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
                     <span>Active Spatial Waste Breakdown</span>
                   </div>
                   <button onClick={() => setActiveTab("heatmap")} className="text-xs text-emerald-500 hover:text-emerald-400 transition-colors">Inspect Floor Plan &gt;</button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-                  {zones.map((zone) => {
-                    const isCritical = zone.healthScore < 50;
-                    const isWarning = zone.healthScore >= 50 && zone.healthScore < 80;
-                    const healthColor = isCritical ? 'text-rose-400' : isWarning ? 'text-amber-400' : 'text-emerald-400';
-                    const bgHealthColor = isCritical ? 'bg-rose-500/20 border-rose-500/30' : isWarning ? 'bg-amber-500/20 border-amber-500/30' : 'bg-emerald-500/20 border-emerald-500/30';
-                    const diff = Math.max(0, zone.currentKw - zone.baselineKw);
+                  {isDbLoading ? (
+                    <div className="col-span-2 text-center text-slate-500 py-10">Loading live zones from Supabase...</div>
+                  ) : (
+                    zones.map((zone) => {
+                      const isCritical = zone.healthScore < 50;
+                      const isWarning = zone.healthScore >= 50 && zone.healthScore < 80;
+                      const healthColor = isCritical ? 'text-rose-400' : isWarning ? 'text-amber-400' : 'text-emerald-400';
+                      const bgHealthColor = isCritical ? 'bg-rose-500/20 border-rose-500/30' : isWarning ? 'bg-amber-500/20 border-amber-500/30' : 'bg-emerald-500/20 border-emerald-500/30';
+                      const diff = Math.max(0, zone.currentKw - zone.baselineKw);
 
-                    return (
-                      <div key={zone.id} className="bg-[#172033] border border-slate-700/50 rounded-lg p-4 flex flex-col justify-between">
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <h4 className="text-sm font-semibold text-slate-200">{zone.name}</h4>
-                            <p className="text-xs text-slate-500 max-w-[150px] truncate" title={zone.issue || 'Nominal Status'}>
-                              {zone.issue || 'Nominal Status'}
-                            </p>
+                      return (
+                        <div key={zone.id} className="bg-[#172033] border border-slate-700/50 rounded-lg p-4 flex flex-col justify-between">
+                          <div className="flex justify-between items-start mb-4">
+                            <div>
+                              <h4 className="text-sm font-semibold text-slate-200">{zone.name}</h4>
+                              <p className="text-xs text-slate-500 max-w-[150px] truncate" title={zone.issue || 'Nominal Status'}>
+                                {zone.issue || 'Nominal Status'}
+                              </p>
+                            </div>
+                            <span className={`${bgHealthColor} ${healthColor} text-xs px-2 py-1 rounded font-mono font-medium border`}>
+                              +{diff} kW
+                            </span>
                           </div>
-                          <span className={`${bgHealthColor} ${healthColor} text-xs px-2 py-1 rounded font-mono font-medium border`}>
-                            +{diff} kW
-                          </span>
+                          <div className="flex justify-between text-xs text-slate-400 border-t border-slate-700/50 pt-3">
+                            <span>Usage: <span className="text-slate-200 font-medium">{zone.currentKw} kW</span></span>
+                            <span>Health: <span className={`${healthColor} font-medium`}>{zone.healthScore}%</span></span>
+                          </div>
                         </div>
-                        <div className="flex justify-between text-xs text-slate-400 border-t border-slate-700/50 pt-3">
-                          <span>Usage: <span className="text-slate-200 font-medium">{zone.currentKw} kW</span></span>
-                          <span>Health: <span className={`${healthColor} font-medium`}>{zone.healthScore}%</span></span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
@@ -506,6 +517,7 @@ export default function App() {
         {activeTab === "roi" && (
           <ActionableROI 
             utilityRate={utilityRate}
+            facility={facility}
             onExport={handleGenerateAudit}
             onReview={(project) => {
               showToast(`Preparing business case for ${project.name}...`, true);
@@ -531,7 +543,7 @@ export default function App() {
           />
         )}
         
-        {activeTab === "leaderboard" && <Leaderboard />}
+        {activeTab === "leaderboard" && <Leaderboard facility={facility} />}
         
         {activeTab === "weather" && (
           <WeatherPanel

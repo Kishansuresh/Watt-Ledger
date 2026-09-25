@@ -8,6 +8,9 @@ import {
   Sliders,
   Upload,
   Zap,
+  TrendingUp,
+  Calculator,
+  ClipboardCheck
 } from "lucide-react";
 
 export default function Sidebar({
@@ -35,6 +38,16 @@ export default function Sidebar({
       id: "heatmap",
       icon: Map,
       label: "Spatial Heatmap",
+    },
+    {
+      id: "roi",
+      icon: TrendingUp,
+      label: "Actionable ROI",
+    },
+    {
+      id: "sandbox",
+      icon: Calculator,
+      label: "Sandbox / What-If",
     },
     {
       id: "feed",
